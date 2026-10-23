@@ -1,0 +1,89 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Email must be verified (works for password sign-up and Google sign-in).
+    function verified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    // ----- mentors -----
+    // A mentor is a verified user whose (lower-case) email has a document in mentorInvites.
+    function inviteId() {
+      return request.auth.token.email.lower();
+    }
+    function isMentor() {
+      return verified() && exists(/databases/$(database)/documents/mentorInvites/$(inviteId()));
+    }
+    function myMentorId() {
+      return get(/databases/$(database)/documents/mentorInvites/$(inviteId())).data.mentorId;
+    }
+
+    // Each person can read only their own approval document (the admin adds these in the console).
+    match /mentorInvites/{email} {
+      allow get: if verified() && request.auth.token.email.lower() == email;
+      allow list, write: if false;
+    }
+
+    // Mentorship requests: the student creates/withdraws; the mentor answers.
+    match /mentorRequests/{id} {
+      function studentFields() {
+        return ['studentId','studentName','studentEmail','course','institution','year','careerMatch',
+                'mentorId','mentorName','status','requestedAt','updatedAt'];
+      }
+
+      allow read: if (verified() && resource.data.studentId == request.auth.uid)
+                  || (isMentor() && resource.data.mentorId == myMentorId());
+
+      // Student sends a new request
+      allow create: if verified()
+        && request.resource.data.studentId == request.auth.uid
+        && id == request.auth.uid + '_' + request.resource.data.mentorId
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasOnly(studentFields());
+
+      allow update:
+        // Student withdraws a pending or scheduled request
+        if (verified() && resource.data.studentId == request.auth.uid
+            && resource.data.status in ['pending','scheduled']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','updatedAt'])
+            && request.resource.data.status == 'withdrawn')
+        // Student asks again after a withdrawal / earlier answer
+        || (verified() && resource.data.studentId == request.auth.uid
+            && resource.data.status in ['withdrawn','declined','cancelled','completed']
+            && request.resource.data.studentId == request.auth.uid
+            && request.resource.data.mentorId == resource.data.mentorId
+            && request.resource.data.status == 'pending'
+            && request.resource.data.keys().hasOnly(studentFields()))
+        // Mentor answers a request addressed to them
+        || (isMentor() && resource.data.mentorId == myMentorId()
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status','startsAt','durationMin','meetLink','declineReason','updatedAt'])
+            && request.resource.data.status in ['scheduled','declined','cancelled','completed']);
+
+      allow delete: if false;
+    }
+
+    // Each student can read/write ONLY their own profile document.
+    match /users/{uid} {
+      allow create: if signedIn() && request.auth.uid == uid;
+      allow read, update, delete: if verified() && request.auth.uid == uid;
+    }
+
+    // Shared reference content: any VERIFIED signed-in user can read, nobody can edit from the app.
+    match /{coll}/{docId} {
+      allow read: if verified()
+        && coll in ['skills','certs','jobs','roadmap_steps','quiz_questions','career_tracks','job_prep_tips','institutions','mentors'];
+      allow write: if false;
+    }
+
+    // Temporary connection test (used by checkFirestore.js)
+    match /_connection_test/{docId} {
+      allow read, write: if verified();
+    }
+  }
+}

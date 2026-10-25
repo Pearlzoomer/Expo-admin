@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import {
   onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
   sendEmailVerification, signInWithPopup, signOut,
+  deleteUser, reauthenticateWithCredential, reauthenticateWithPopup, EmailAuthProvider,
 } from "firebase/auth";
 import {
   collection, doc, getDoc, onSnapshot, query, where, updateDoc,
-  serverTimestamp, deleteField, Timestamp,
+  serverTimestamp, deleteField, Timestamp, deleteDoc,
 } from "firebase/firestore";
 import { auth, db, googleProvider } from "./firebase";
 
@@ -210,6 +211,7 @@ function Dashboard({ mentor }) {
   const [tab, setTab] = useState("pending");
   const [modal, setModal] = useState(null); // { req, mode }
   const [toast, setToast] = useState("");
+  const [delOpen, setDelOpen] = useState(false);
 
   useEffect(() => {
     const q = query(collection(db, "mentorRequests"), where("mentorId", "==", mentor.mentorId));
@@ -245,7 +247,10 @@ function Dashboard({ mentor }) {
           <div className="eyebrow">Mentor Portal · {mentor.mentorName}</div>
           <h1>Mentorship requests</h1>
         </div>
-        <button className="tab" onClick={() => signOut(auth)}>Sign out</button>
+        <div className="btns" style={{ marginTop: 0 }}>
+          <button className="tab" onClick={() => setDelOpen(true)}>Delete account</button>
+          <button className="tab" onClick={() => signOut(auth)}>Sign out</button>
+        </div>
       </div>
 
       <div className="tabs">
@@ -309,6 +314,12 @@ function Dashboard({ mentor }) {
       </div>
 
       {modal && <ActionModal {...modal} onClose={() => setModal(null)} onDone={() => setModal(null)} />}
+      {delOpen && (
+        <DeleteModal
+          openCount={rows.filter((r) => r.status === "pending" || r.status === "scheduled").length}
+          onClose={() => setDelOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -377,6 +388,75 @@ function ActionModal({ req, mode, onClose, onDone }) {
           </button>
           <button className="btn ghost" onClick={onClose}>Back</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteModal({ openCount, onClose }) {
+  const user = auth.currentUser;
+  const usesPassword = user.providerData.some((p) => p.providerId === "password");
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const remove = async () => {
+    setErr("");
+    if (usesPassword && !password) return setErr("Enter your password to confirm.");
+    setBusy(true);
+    try {
+      // Firebase asks for a fresh sign-in before deleting an account
+      if (usesPassword) {
+        await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password));
+      } else {
+        await reauthenticateWithPopup(user, googleProvider);
+      }
+      // Remove the mentor's approval first (needs the login), then the login itself
+      try {
+        await deleteDoc(doc(db, "mentorInvites", user.email.toLowerCase()));
+      } catch (e) {
+        console.warn("Could not remove the approval document:", e.code);
+      }
+      await deleteUser(user); // the page returns to the sign-in screen by itself
+    } catch (e) {
+      const wrong = ["auth/wrong-password", "auth/invalid-credential"].includes(e.code);
+      setErr(wrong ? "Wrong password." : `${e.code || "error"}: ${e.message || "Something went wrong."}`);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h1 style={{ fontSize: 20, color: "var(--deep)", marginBottom: 12 }}>Delete your account?</h1>
+        {openCount > 0 ? (
+          <>
+            <p className="err">
+              You still have {openCount} open request{openCount === 1 ? "" : "s"} (pending or scheduled).
+              Answer, cancel or complete them first so students aren't left waiting.
+            </p>
+            <div className="btns"><button className="btn ghost" onClick={onClose}>Back</button></div>
+          </>
+        ) : (
+          <>
+            <p className="sub" style={{ marginBottom: 12 }}>
+              This permanently deletes your mentor login and removes your approval to use the portal.
+              You can't undo it. To come back later, the program admin has to approve your email again.
+            </p>
+            {usesPassword && (
+              <>
+                <label>Enter your password to confirm</label>
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              </>
+            )}
+            {!usesPassword && <p className="sub">You'll be asked to confirm with Google.</p>}
+            {err && <p className="err">{err}</p>}
+            <div className="btns" style={{ marginTop: 0 }}>
+              <button className="btn danger" disabled={busy} onClick={remove}>{busy ? "Deleting…" : "Delete my account"}</button>
+              <button className="btn ghost" onClick={onClose}>Cancel</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

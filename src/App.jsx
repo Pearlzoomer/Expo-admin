@@ -370,7 +370,7 @@ function ActionModal({ req, mode, onClose, onDone }) {
             <input type="number" min="15" step="15" value={duration} onChange={(e) => setDuration(e.target.value)} />
             <label>Google Meet link</label>
             <input placeholder="https://meet.google.com/..." value={link} onChange={(e) => setLink(e.target.value)} />
-            <a className="btn ghost" href="https://meet.new" target="_blank" rel="noreferrer" style={{ marginBottom: 12 }}>
+            <a className="btn ghost block meet-btn" href="https://meet.new" target="_blank" rel="noreferrer">
               Create Meet link
             </a>
           </>
@@ -382,7 +382,7 @@ function ActionModal({ req, mode, onClose, onDone }) {
           </>
         )}
         {err && <p className="err">{err}</p>}
-        <div className="btns" style={{ marginTop: 0 }}>
+        <div className="modal-actions">
           <button className={`btn ${mode === "decline" || mode === "cancel" ? "danger" : ""}`} disabled={busy} onClick={submit}>
             {busy ? "Working…" : "Confirm"}
           </button>
@@ -435,7 +435,7 @@ function DeleteModal({ openCount, onClose }) {
               You still have {openCount} open request{openCount === 1 ? "" : "s"} (pending or scheduled).
               Answer, cancel or complete them first so students aren't left waiting.
             </p>
-            <div className="btns"><button className="btn ghost" onClick={onClose}>Back</button></div>
+            <div className="modal-actions"><button className="btn ghost" onClick={onClose}>Back</button></div>
           </>
         ) : (
           <>
@@ -451,7 +451,7 @@ function DeleteModal({ openCount, onClose }) {
             )}
             {!usesPassword && <p className="sub">You'll be asked to confirm with Google.</p>}
             {err && <p className="err">{err}</p>}
-            <div className="btns" style={{ marginTop: 0 }}>
+            <div className="modal-actions">
               <button className="btn danger" disabled={busy} onClick={remove}>{busy ? "Deleting…" : "Delete my account"}</button>
               <button className="btn ghost" onClick={onClose}>Cancel</button>
             </div>
